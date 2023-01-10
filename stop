@@ -1,0 +1,8 @@
+#!/bin/bash
+
+sudo -u vpnuser podman kill vpnserver
+sudo -u vpnuser podman rm vpnserver
+killall -u vpnuser
+userdel vpnuser
+rm -r /home/vpnuser
+rm setup

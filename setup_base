@@ -1,0 +1,79 @@
+
+#Predefined Arguments
+ersa_path=/etc/openvpn/easy-rsa
+openvpn_path=/etc/openvpn
+
+
+#Setup VPNServer keys and certificates
+make-cadir $ersa_path
+cd $ersa_path
+./easyrsa init-pki
+echo -e "$serverpass\n$serverpass\nserver\n" | ./easyrsa build-ca
+echo -e "server\nyes\n" | ./easyrsa gen-req server nopass
+./easyrsa gen-dh
+echo -e "yes\n" | ./easyrsa gen-req server nopass
+echo -e "yes\n$serverpass\n" | ./easyrsa sign-req server server
+cp pki/dh.pem pki/ca.crt pki/issued/server.crt pki/private/server.key /etc/openvpn/
+
+
+#Setup Clients
+for client in ${clients[@]}
+do
+	echo -e "$client\n" | ./easyrsa gen-req $client nopass
+	echo -e "yes\n$serverpass\n$serverpass\n" | ./easyrsa sign-req client $client
+done
+
+
+#Setup VPNServer config file
+cd $openvpn_path
+echo "port 1194" > server.conf
+echo "proto udp" >> server.conf
+echo "dev tun" >> server.conf
+    
+echo "ca $openvpn_path/ca.crt" >> server.conf
+echo "cert $openvpn_path/server.crt" >> server.conf
+echo "key $openvpn_path/server.key" >> server.conf
+echo "dh $openvpn_path/dh.pem" >> server.conf
+echo "tls-crypt $openvpn_path/ta.key 0" >> server.conf
+    
+echo "server 10.8.0.0 255.255.255.0" >> server.conf
+echo "cipher AES-256-CBC" >> server.conf
+echo "data-ciphers AES-256-CBC" >> server.conf
+echo "client-to-client" >> server.conf
+echo "topology subnet" >> server.conf
+echo "keepalive 10 120" >> server.conf
+echo "verb 3" >> server.conf
+
+openvpn --genkey secret ta.key
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.conf
+sysctl -p /etc/sysctl.conf
+
+
+#Setup Client Files
+cd $openvpn_path
+for i in $(seq 0 $((${#clients[@]}-1)))
+do
+	file=/home/${clients[$i]}.ovpn
+	echo "client" > $file
+	echo "dev tun" >> $file
+	echo "proto udp" >> $file
+	echo "remote ${ips[$i]} 1194" >> $file
+	echo "remote-cert-tls server" >> $file
+	echo "cipher AES-256-CBC" >> $file
+	echo "keepalive 10 120" >> $file
+	echo "comp-lzo" >> $file
+	echo "redirect-gateway def1" >> $file
+
+	echo "<ca>" >> $file
+	cat ca.crt >> $file
+	echo "</ca>" >> $file
+	echo "<cert>" >> $file
+	sed -n '/-----BEGIN CERTIFICATE-----/,/-----/p' $ersa_path/pki/issued/${clients[$i]}.crt >> $file
+	echo "</cert>" >> $file
+	echo "<key>" >> $file
+	cat $ersa_path/pki/private/${clients[$i]}.key >> $file
+	echo "</key>" >> $file
+	echo "<tls-crypt>" >> $file
+	cat ta.key >> $file
+	echo "</tls-crypt>" >> $file
+done

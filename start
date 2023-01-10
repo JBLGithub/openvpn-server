@@ -1,0 +1,59 @@
+#!/bin/bash
+
+#User
+useradd -m -s /bin/rbash vpnuser
+echo "Enter password for the low privilege user (vpnuser) running the container:"
+read -s user_pass
+echo -e "$user_pass\n$user_pass\n" | passwd vpnuser
+rm /home/vpnuser/.*
+mkdir -p /home/vpnuser/bin
+chown root:root /home/vpnuser/bin
+chmod -R 711 /home/vpnuser/bin
+echo "PATH=\$HOME/bin" > /home/vpnuser/.bashrc
+chown root:root /home/vpnuser/.bashrc
+chmod 711 /home/vpnuser/.bashrc
+
+#Setup
+printf "#!/bin/bash\n\n" > setup
+
+echo "Enter a passphrase for the server:"
+read -s server_pass
+echo "serverpass=\"$server_pass\"" >> setup
+
+echo "How many clients do you need?"
+read nb_clients
+clients_string="clients=("
+ips_string="ips=("
+for i in $(seq 1 $nb_clients)
+do
+	echo "Enter a name for vpn client $i:"
+	read client
+	clients_string+="\"$client\" "
+	echo "Enter server ip for vpn client $client"
+	read ip
+	ips_string+="\"$ip\" "
+done	
+clients_string+=")"
+ips_string+=")"
+echo $clients_string >> setup
+echo $ips_string >> setup
+
+cat setup_base >> setup
+
+
+#Copy files to restricted user
+cp Dockerfile /home/vpnuser/Dockerfile
+chmod 744 /home/vpnuser/Dockerfile
+cp setup /home/vpnuser/setup
+chmod 744 /home/vpnuser/setup
+mkdir -p /home/vpnuser/out
+chown vpnuser:vpnuser /home/vpnuser/out
+chmod -R 600 /home/vpnuser/out 
+
+
+#Run image
+sudo -u vpnuser podman build -t vpnserver /home/vpnuser/
+sudo -u vpnuser podman run -d -p 1194:1194/udp --cap-add=NET_ADMIN --device /dev/net/tun -v /home/vpnuser/out:/home --name vpnserver vpnserver
+
+#Debugging
+#sudo -u vpnuser podman run -it --entrypoint /bin/bash -p 1194:1194/udp --name vpnserver --cap-add=NET_ADMIN --device /dev/net/tun vpnserver 
